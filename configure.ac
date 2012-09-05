@@ -909,7 +909,7 @@ if test $build_ft2232_ftd2xx = yes -o $build_presto_ftd2xx = yes -o $build_usb_b
       if test -f "$with_ftd2xx_linux_tardir/$dir/libftd2xx.a"; then
           FTD2XX_LDFLAGS="-L$with_ftd2xx_linux_tardir/$dir"
           # Also needs -lrt
-          FTD2XX_LIB="-lftd2xx -lrt"
+          FTD2XX_LIB="-Wl,-Bstatic -lftd2xx -Wl,-Bdynamic -lrt"
       else
         # Test Number2.
         # Grr.. perhaps it exists as a version number?
