@@ -197,6 +197,9 @@ static int flossjtag_init(void);
 static int xds100v2_init(void);
 static int digilent_hs1_init(void);
 
+/* deinit procedures for supported layouts */
+static int icdi_jtag_deinit(void);
+
 /* reset procedures for supported layouts */
 static void ftx23_reset(int trst, int srst);
 static void jtagkey_reset(int trst, int srst);
@@ -257,6 +260,7 @@ static const struct ft2232_layout  ft2232_layouts[] = {
 	},
 	{ .name = "luminary_icdi",
 		.init = icdi_jtag_init,
+		.deinit = icdi_jtag_deinit,
 		.reset = ftx23_reset,
 	},
 	{ .name = "olimex-jtag",
@@ -3054,6 +3058,20 @@ static int xds100v2_init(void)
 	if (ft2232_set_data_bits_high_byte(high_output, high_direction) != ERROR_OK) {
 		LOG_ERROR("couldn't bring CPLD out of reset with 'xds100v2' layout");
 		return ERROR_JTAG_INIT_FAILED;
+	}
+
+	return ERROR_OK;
+}
+
+static int icdi_jtag_deinit(void)
+{
+	/* disable debug adapter */
+	low_direction &= ~(ICDI_JTAG_EN | ICDI_DBG_ENn);
+	low_output    &= ~ICDI_JTAG_EN;
+	low_output    |= ICDI_DBG_ENn;
+	if (ft2232_set_data_bits_low_byte(low_output, low_direction) != ERROR_OK) {
+		LOG_ERROR("couldn't deinitialize FT2232 DBUS with 'luminary_icdi' layout");
+		return ERROR_JTAG_DEVICE_ERROR;
 	}
 
 	return ERROR_OK;
