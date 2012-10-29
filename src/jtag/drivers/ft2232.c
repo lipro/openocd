@@ -195,6 +195,10 @@ static int lisa_l_init(void);
 static int flossjtag_init(void);
 static int xds100v2_init(void);
 static int digilent_hs1_init(void);
+static int achjtag_init(void);
+
+/* deinit procedures for supported layouts */
+static int achjtag_deinit(void);
 
 /* reset procedures for supported layouts */
 static void ftx23_reset(int trst, int srst);
@@ -224,6 +228,7 @@ static void signalyzer_h_blink(void);
 static void ktlink_blink(void);
 static void lisa_l_blink(void);
 static void flossjtag_blink(void);
+static void achjtag_blink(void);
 
 /* common transport support options */
 
@@ -343,6 +348,13 @@ static const struct ft2232_layout  ft2232_layouts[] = {
 	{ .name = "digilent-hs1",
 		.init = digilent_hs1_init,
 		.reset = digilent_hs1_reset,
+		.channel = INTERFACE_A,
+	},
+	{ .name = "achjtag",
+		.init = achjtag_init,
+		.reset = ftx23_reset,
+		.blink = achjtag_blink,
+		.deinit = achjtag_deinit,
 		.channel = INTERFACE_A,
 	},
 	{ .name = NULL, /* END OF TABLE */ },
@@ -4231,6 +4243,123 @@ static int digilent_hs1_init(void)
 static void digilent_hs1_reset(int trst, int srst)
 {
 	/* Dummy function, no reset signals supported. */
+}
+
+/********************************************************************
+ * Support for Alere Connected Health JTAG
+ * adapter from Alere Technologies GmbH
+ * This layout was inspired and partly derived from the
+ * 'luminary_icdi', 'flyswatter', and 'flossjtag' layout.
+ * (URL here)
+ * Author: Stephan Linz <linz@li-pro.net>
+ *******************************************************************/
+
+static int achjtag_init(void)
+{
+	/* output/high: TCK, TDO, TMS / input: TDI */
+	ftx232_dbus_init();
+
+	/* Most ACH eval boards support SWO trace output,
+	 * and should use this "ach-jtag" layout.
+	 *
+	 * ADBUS 0..3 are used for JTAG as usual.  GPIOs are
+	 * used to switch between JTAG and SWD, or switch the
+	 * ft2232 UART on the second MPSSE channel/interface
+	 * (DBUS) between (i) the console UART (on ACH core
+	 * boards) or (ii) SWO trace data (generic).
+	 *
+	 * We come up in JTAG mode and may switch to SWD later
+	 * (with SWO/trace option if SWD is active).
+	 *
+	 * ACBUS 0 is used for voltage sens. ACBUS 1..2 are
+	 * used for reset signals read back:
+	 * - Vcc sens		on ACBUS0 (input)
+	 * - TRST sens		on ACBUS1 (input)
+	 * - SRST sens		on ACBUS2 (input)
+	 *
+	 * ACBUS 3..4 are used for JTAG communication LEDs:
+	 *  - JTAG RxD (green)	on ACBUS3 (output)
+	 *  - JTAG TxD (red)	on ACBUS4 (output)
+	 *
+	 * DBUS == GPIO-Lx
+	 * CBUS == GPIO-Hx
+	 */
+
+#define ACHI_JTAG_EN	(1 << 7)	/* ADBUS 7 (a.k.a. DBGMOD) */
+#define ACHI_DBG_ENn	(1 << 6)	/* ADBUS 6 (a.k.a. DBGEN#) */
+#define ACHI_SRST	(1 << 5)	/* ADBUS 5 */
+#define ACHI_TRST	(1 << 4)	/* ADBUS 4 */
+
+#define ACHI_VSENS	(1 << 0)	/* ACBUS 3 (a.k.a. VSENS) */
+#define ACHI_TRSTSENS	(1 << 1)	/* ACBUS 3 (a.k.a. TRSTSENS) */
+#define ACHI_SRSTSENS	(1 << 2)	/* ACBUS 3 (a.k.a. SRSTSENS) */
+#define ACHI_JRXLED	(1 << 3)	/* ACBUS 3 (a.k.a. green LED) */
+#define ACHI_JTXLED	(1 << 4)	/* ACBUS 4 (a.k.a. red LED) */
+
+	/* GPIOs on second channel/interface (UART) ... */
+#define ACHI_SWO_EN	(1 << 4)	/* BDBUS 4 (a.k.a. SWOEN) */
+#define ACHI_TX_SWO	(1 << 1)	/* BDBUS 1 */
+#define ACHI_VCP_RX	(1 << 0)	/* BDBUS 0 (to console UART) */
+
+	nTRST = ACHI_TRST;
+	nTRSTnOE = ACHI_TRST;
+	nSRST = ACHI_SRST;
+	nSRSTnOE = ACHI_SRST;
+
+	low_direction	|= ACHI_JTAG_EN | ACHI_DBG_ENn;
+	low_output	|= ACHI_JTAG_EN;
+	low_output	&= ~ACHI_DBG_ENn;
+
+	high_output	= 0x00;
+	high_direction	|= ACHI_JRXLED | ACHI_JTXLED;
+	high_direction	&= ~(ACHI_VSENS | ACHI_TRSTSENS | ACHI_SRSTSENS);
+
+	/* initialize high byte for jtag */
+	if (ft2232_set_data_bits_high_byte(high_output, high_direction) != ERROR_OK) {
+		LOG_ERROR("couldn't initialize FT2232 with 'achjtag' layout");
+		return ERROR_JTAG_INIT_FAILED;
+	}
+
+	return ftx232_dbus_write();
+}
+
+static int achjtag_deinit(void)
+{
+	/* disable debug adapter */
+	low_direction	&= ~(ACHI_JTAG_EN | ACHI_DBG_ENn);
+	low_output	&= ~ACHI_JTAG_EN;
+	low_output	|= ACHI_DBG_ENn;
+	if (ft2232_set_data_bits_low_byte(low_output, low_direction) != ERROR_OK) {
+		LOG_ERROR("couldn't deinitialize FT2232 low-byte with 'ACH-JTAG' layout");
+		return ERROR_JTAG_DEVICE_ERROR;
+	}
+
+	/* switch off all LEDs, set all GPIOs to input */
+	high_output	= 0x00;
+	high_direction	= 0x00;
+	if (ft2232_set_data_bits_high_byte(high_output, high_direction) != ERROR_OK) {
+		LOG_ERROR("couldn't deinitialize FT2232 high-byte with 'ACH-JTAG' layout");
+		return ERROR_JTAG_DEVICE_ERROR;
+	}
+
+	return ERROR_OK;
+}
+
+static void achjtag_blink(void)
+{
+	/*
+	 * ACH-JTAG has two LEDs connected to ACBUS3 and ACBUS4,
+	 * all others for GPIO input
+	 */
+
+	if (high_output & ACHI_JTXLED)
+		high_output = ACHI_JRXLED;
+	else
+		high_output = ACHI_JTXLED;
+
+	buffer_write(0x82);
+	buffer_write(high_output);
+	buffer_write(high_direction);
 }
 
 static const struct command_registration ft2232_command_handlers[] = {
