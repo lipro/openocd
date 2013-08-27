@@ -109,7 +109,9 @@ struct signal {
 static struct signal *signals;
 
 static uint16_t output;
+static uint16_t output_shd;
 static uint16_t direction;
+static uint16_t direction_shd;
 
 static struct signal *find_signal_by_name(const char *name)
 {
@@ -658,9 +660,18 @@ static int ftdi_initialize(void)
 
 static int ftdi_quit(void)
 {
+	LOG_DEBUG("ftdi interface deinitialization on shutdown");
+
+	mpsse_set_data_bits_low_byte(mpsse_ctx, output_shd & 0xff, direction_shd & 0xff);
+	mpsse_set_data_bits_high_byte(mpsse_ctx, output_shd >> 8, direction_shd >> 8);
+
+	int retval = mpsse_flush(mpsse_ctx);
+	if (retval != ERROR_OK)
+		LOG_ERROR("error while flushing MPSSE queue: %d", retval);
+
 	mpsse_close(mpsse_ctx);
 
-	return ERROR_OK;
+	return retval;
 }
 
 COMMAND_HANDLER(ftdi_handle_device_desc_command)
@@ -706,6 +717,17 @@ COMMAND_HANDLER(ftdi_handle_layout_init_command)
 
 	COMMAND_PARSE_NUMBER(u16, CMD_ARGV[0], output);
 	COMMAND_PARSE_NUMBER(u16, CMD_ARGV[1], direction);
+
+	return ERROR_OK;
+}
+
+COMMAND_HANDLER(ftdi_handle_layout_shutdown_command)
+{
+	if (CMD_ARGC != 2)
+		return ERROR_COMMAND_SYNTAX_ERROR;
+
+	COMMAND_PARSE_NUMBER(u16, CMD_ARGV[0], output_shd);
+	COMMAND_PARSE_NUMBER(u16, CMD_ARGV[1], direction_shd);
 
 	return ERROR_OK;
 }
@@ -843,6 +865,15 @@ static const struct command_registration ftdi_command_handlers[] = {
 		.mode = COMMAND_CONFIG,
 		.help = "initialize the FTDI GPIO signals used "
 			"to control output-enables and reset signals",
+		.usage = "data direction",
+	},
+	{
+		.name = "ftdi_layout_shutdown",
+		.handler = &ftdi_handle_layout_shutdown_command,
+		.mode = COMMAND_CONFIG,
+		.help = "(de-)initialize the FTDI GPIO signals used "
+			"to control output-enables and reset signals "
+			"on adapter shutdown",
 		.usage = "data direction",
 	},
 	{
