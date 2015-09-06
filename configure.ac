@@ -1,4 +1,4 @@
-AC_PREREQ(2.64)
+AC_PREREQ(2.60)
 AC_INIT([openocd], [0.9.0],
   [OpenOCD Mailing List <openocd-devel@lists.sourceforge.net>])
 AC_CONFIG_SRCDIR([src/openocd.c])
