@@ -12,6 +12,15 @@ m4_define([m4_ifnblank],
 ]), [], [$3], [$2])])])
 dnl
 
+dnl
+dnl If needed, define the m4_argn macro from autoconf 2.64
+dnl This allows us to run with earlier Autoconfs as well.
+ifdef([m4_argn],[],[
+m4_define([m4_argn],
+[m4_assert([0 < $1])]dnl
+[m4_pushdef([_$0], [_m4_popdef([_$0])]m4_dquote([$]m4_incr([$1])))_$0($@)])])
+dnl
+
 dnl AC_CONFIG_SUBDIRS does not allow configure options to be passed
 dnl to subdirs, this function allows that by creating a configure.gnu
 dnl script that prepends configure options and then calls the real
